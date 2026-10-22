@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mar-vision-service
+  namespace: mar-system
+  labels:
+    app: mar-vision-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mar-vision-service
+  template:
+    metadata:
+      labels:
+        app: mar-vision-service
+    spec:
+      containers:
+        - name: vision-service
+          image: mar-vision-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: stream-http
+          envFrom:
+            - configMapRef:
+                name: mar-cluster-config
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: dev-mount
+              mountPath: /dev
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2500m
+              memory: 2048Mi
+      volumes:
+        - name: dev-mount
+          hostPath:
+            path: /dev
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mar-vision-service
+  namespace: mar-system
+  labels:
+    app: mar-vision-service
+spec:
+  type: NodePort
+  selector:
+    app: mar-vision-service
+  ports:
+    - name: stream-http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30080

@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mar-decision-engine
+  namespace: mar-system
+  labels:
+    app: mar-decision-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mar-decision-engine
+  template:
+    metadata:
+      labels:
+        app: mar-decision-engine
+    spec:
+      containers:
+        - name: decision-engine
+          image: mar-decision-engine:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: mar-cluster-config
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 600m
+              memory: 512Mi

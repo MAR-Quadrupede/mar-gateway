@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mar-cluster-config
+  namespace: mar-system
+  labels:
+    app.kubernetes.io/part-of: mar-quadrupede
+data:
+  MQTT_BROKER: "mar-mosquitto"
+  MQTT_PORT: "1883"
+  WS_PORT: "8765"
+  SERIAL_PORT: "/dev/ttyACM0"
+  SERIAL_BAUD: "115200"
+  HEARTBEAT_SEC: "0.2"
+  LIDAR_PORT: "/dev/ttyUSB0"
+  LIDAR_SIMULATE: "false"
+  STREAM_PORT: "8080"
+  DASHBOARD_PORT: "3000"

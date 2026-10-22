@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mar-dashboard
+  namespace: mar-system
+  labels:
+    app: mar-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mar-dashboard
+  template:
+    metadata:
+      labels:
+        app: mar-dashboard
+    spec:
+      containers:
+        - name: dashboard
+          image: mar-dashboard:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: web-ui
+          env:
+            - name: NODE_ENV
+              value: "development"
+            - name: PORT
+              value: "3000"
+            - name: VITE_WS_URL
+              value: "ws://localhost:30765"
+            - name: VITE_API_BASE
+              value: "http://localhost:30000/api"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 600m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mar-dashboard
+  namespace: mar-system
+  labels:
+    app: mar-dashboard
+spec:
+  type: NodePort
+  selector:
+    app: mar-dashboard
+  ports:
+    - name: web-ui
+      port: 3000
+      targetPort: 3000
+      nodePort: 30000

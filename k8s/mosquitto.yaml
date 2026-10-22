@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mosquitto-config
+  namespace: mar-system
+data:
+  mosquitto.conf: |
+    listener 1883 0.0.0.0
+    allow_anonymous true
+    listener 9001 0.0.0.0
+    protocol websockets
+    allow_anonymous true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mar-mosquitto
+  namespace: mar-system
+  labels:
+    app: mar-mosquitto
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mar-mosquitto
+  template:
+    metadata:
+      labels:
+        app: mar-mosquitto
+    spec:
+      containers:
+        - name: mosquitto
+          image: eclipse-mosquitto:2.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 1883
+              name: mqtt
+            - containerPort: 9001
+              name: mqtt-ws
+          volumeMounts:
+            - name: config
+              mountPath: /mosquitto/config/mosquitto.conf
+              subPath: mosquitto.conf
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: config
+          configMap:
+            name: mosquitto-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mar-mosquitto
+  namespace: mar-system
+  labels:
+    app: mar-mosquitto
+spec:
+  type: ClusterIP
+  selector:
+    app: mar-mosquitto
+  ports:
+    - name: mqtt
+      port: 1883
+      targetPort: 1883
+    - name: mqtt-ws
+      port: 9001
+      targetPort: 9001

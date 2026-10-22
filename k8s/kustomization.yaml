@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: mar-system
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - mosquitto.yaml
+  - gateway.yaml
+  - serial-bridge.yaml
+  - lidar-service.yaml
+  - vision-service.yaml
+  - decision-engine.yaml
+  - dashboard.yaml

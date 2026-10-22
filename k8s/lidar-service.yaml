@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mar-lidar-service
+  namespace: mar-system
+  labels:
+    app: mar-lidar-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mar-lidar-service
+  template:
+    metadata:
+      labels:
+        app: mar-lidar-service
+    spec:
+      containers:
+        - name: lidar-service
+          image: mar-lidar-service:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: mar-cluster-config
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: dev-mount
+              mountPath: /dev
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+      volumes:
+        - name: dev-mount
+          hostPath:
+            path: /dev

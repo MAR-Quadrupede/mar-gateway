@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mar-gateway
+  namespace: mar-system
+  labels:
+    app: mar-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mar-gateway
+  template:
+    metadata:
+      labels:
+        app: mar-gateway
+    spec:
+      containers:
+        - name: gateway
+          image: mar-gateway:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8765
+              name: ws-gateway
+          envFrom:
+            - configMapRef:
+                name: mar-cluster-config
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mar-gateway
+  namespace: mar-system
+  labels:
+    app: mar-gateway
+spec:
+  type: NodePort
+  selector:
+    app: mar-gateway
+  ports:
+    - name: ws-gateway
+      port: 8765
+      targetPort: 8765
+      nodePort: 30765
