@@ -13,3 +13,7 @@ resources:
   - vision-service.yaml
   - decision-engine.yaml
   - dashboard.yaml
+  - monitoring/node-exporter.yaml
+  - monitoring/prometheus.yaml
+  - monitoring/grafana.yaml
+  - monitoring/portainer.yaml
