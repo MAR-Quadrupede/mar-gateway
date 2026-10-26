@@ -27,6 +27,10 @@ spec:
               value: "development"
             - name: PORT
               value: "3000"
+            - name: DATABASE_URL
+              value: "postgresql://user:password@localhost:5432/mar_dashboard?sslmode=disable"
+            - name: JWT_SECRET
+              value: "your-jwt-secret-here"
             - name: VITE_WS_URL
               value: "ws://localhost:30765"
             - name: VITE_API_BASE

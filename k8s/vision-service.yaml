@@ -20,7 +20,7 @@ spec:
           image: mar-vision-service:latest
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8080
+            - containerPort: 8443
               name: stream-http
           envFrom:
             - configMapRef:
@@ -55,6 +55,6 @@ spec:
     app: mar-vision-service
   ports:
     - name: stream-http
-      port: 8080
-      targetPort: 8080
+      port: 8443
+      targetPort: 8443
       nodePort: 30080
