@@ -25,6 +25,9 @@ spec:
           envFrom:
             - configMapRef:
                 name: mar-cluster-config
+          # Link LoRa: per usare la radio in cluster impostare LORA_ENABLED=true
+          # e montare /dev (privileged: true + volumeMount hostPath /dev,
+          # come in mar-serial-bridge).
           resources:
             requests:
               cpu: 50m

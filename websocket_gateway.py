@@ -9,7 +9,7 @@ import sys
 import json
 import asyncio
 import signal
-from typing import Set
+from typing import Optional, Set
 
 try:
     import paho.mqtt.client as mqtt
@@ -21,13 +21,36 @@ try:
 except ImportError:
     websockets = None
 
+from lora_telemetry import LoRaRadio, LoRaBridge
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ("true", "1", "yes", "on")
+
+
 MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 WS_PORT = int(os.getenv("WS_PORT", "8765"))
 
+# LoRa long-range telemetry link towards the ground station
+LORA_ENABLED = env_bool("LORA_ENABLED", False)
+LORA_BACKEND = os.getenv("LORA_BACKEND", "auto")
+LORA_PORT = os.getenv("LORA_PORT", "/dev/ttyUSB0")
+LORA_BAUD = int(os.getenv("LORA_BAUD", "9600"))
+LORA_SPI_BUS = int(os.getenv("LORA_SPI_BUS", "0"))
+LORA_SPI_DEV = int(os.getenv("LORA_SPI_DEV", "0"))
+LORA_CS_PIN = int(os.getenv("LORA_CS_PIN", "5"))
+LORA_RST_PIN = int(os.getenv("LORA_RST_PIN", "25"))
+LORA_FREQ_MHZ = float(os.getenv("LORA_FREQ_MHZ", "868.0"))
+LORA_TX_INTERVAL = float(os.getenv("LORA_TX_INTERVAL", "1.0"))
+
 connected_clients: Set = set()
 loop: asyncio.AbstractEventLoop = None
 mqtt_client = None
+lora_bridge: Optional[LoRaBridge] = None
 
 
 def on_mqtt_message(client, userdata, msg):
@@ -37,6 +60,10 @@ def on_mqtt_message(client, userdata, msg):
         data = json.loads(msg.payload.decode("utf-8"))
     except Exception:
         data = msg.payload.decode("utf-8")
+
+    # Feed the long-range radio link with the aggregated robot state
+    if lora_bridge is not None:
+        lora_bridge.handle_message(topic, data)
 
     packet = json.dumps({
         "topic": topic,
@@ -96,7 +123,7 @@ async def ws_handler(websocket):
 
 
 async def main_async():
-    global loop, mqtt_client
+    global loop, mqtt_client, lora_bridge
     loop = asyncio.get_running_loop()
 
     print("=" * 60)
@@ -114,6 +141,32 @@ async def main_async():
         except Exception as e:
             print(f"  ⚠️ Connessione MQTT fallita ({e}).")
 
+    # Long-range LoRa telemetry link (RFM95W SPI or Waveshare SX1262 USB)
+    if LORA_ENABLED:
+        def on_lora_rx(line: str):
+            if mqtt_client and mqtt_client.is_connected():
+                mqtt_client.publish("mar/lora/rx", json.dumps({
+                    "timestamp": time.time(),
+                    "payload": line
+                }))
+
+        radio = LoRaRadio(
+            backend=LORA_BACKEND,
+            port=LORA_PORT,
+            baudrate=LORA_BAUD,
+            spi_bus=LORA_SPI_BUS,
+            spi_device=LORA_SPI_DEV,
+            cs_pin=LORA_CS_PIN,
+            rst_pin=LORA_RST_PIN,
+            freq_mhz=LORA_FREQ_MHZ,
+            on_receive=on_lora_rx
+        )
+        radio.open()
+        lora_bridge = LoRaBridge(radio, mqtt_client=mqtt_client, interval_s=LORA_TX_INTERVAL)
+        lora_bridge.start()
+    else:
+        print("  ℹ️ [LORA] Link Long-Range disabilitato (LORA_ENABLED=false).")
+
     if websockets is None:
         print("✗ websockets non è installato. Esegui: pip install websockets")
         return
@@ -128,6 +181,9 @@ def main():
         asyncio.run(main_async())
     except KeyboardInterrupt:
         print("\n[GATEWAY] Chiusura gateway...")
+    finally:
+        if lora_bridge is not None:
+            lora_bridge.stop()
 
 
 if __name__ == "__main__":

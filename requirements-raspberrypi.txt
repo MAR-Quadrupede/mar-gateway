@@ -1,0 +1,8 @@
+# ==============================================================================
+# M.A.R. — mar-gateway hardware dependencies (Raspberry Pi only)
+# ==============================================================================
+# Required only for the LoRa SPI backend (RFM95W / SX1276).
+# The USB backend (Waveshare SX1262) only needs pyserial.
+
+RPi.GPIO>=0.7.1
+spidev>=6.0
