@@ -221,11 +221,24 @@ async def ws_handler(websocket):
                             json.dumps({"reason": "DASHBOARD_BUTTON", "timestamp": time.time()}),
                         )
 
+                elif msg_type == "RESUME":
+                    print("✅ [GATEWAY] Resume da WebSocket")
+                    if mqtt_client:
+                        mqtt_client.publish(
+                            "mar/safety/resume",
+                            json.dumps({"reason": "DASHBOARD_RESUME", "timestamp": time.time()}),
+                        )
+
                 elif msg_type == "MOTION_CMD":
                     cmd_data = data.get("data", {})
                     if mqtt_client:
                         if "timestamp" not in cmd_data:
                             cmd_data = {**cmd_data, "timestamp": time.time()}
+                        # Manual motion implies operator wants to leave latched E-STOP
+                        mqtt_client.publish(
+                            "mar/safety/resume",
+                            json.dumps({"reason": "MOTION_AFTER_ESTOP", "timestamp": time.time()}),
+                        )
                         mqtt_client.publish("mar/control/motion", json.dumps(cmd_data))
 
                 elif msg_type == "PING":
