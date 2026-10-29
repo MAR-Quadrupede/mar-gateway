@@ -27,6 +27,15 @@ spec:
           envFrom:
             - configMapRef:
                 name: mar-cluster-config
+          env:
+            - name: MAR_YOLO_STRIDE
+              value: "8"
+            - name: MAR_SGBM_DIV
+              value: "4"
+            - name: MAR_RECT_DIV
+              value: "2"
+            - name: MAR_STREAM_MAX_W
+              value: "960"
           securityContext:
             privileged: true
           volumeMounts:
