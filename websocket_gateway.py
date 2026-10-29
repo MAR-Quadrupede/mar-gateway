@@ -131,15 +131,22 @@ async def main_async():
     print("=" * 60)
 
     if mqtt:
-        try:
-            mqtt_client = mqtt.Client(client_id="mar-gateway-server")
-            mqtt_client.on_message = on_mqtt_message
-            mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
-            mqtt_client.subscribe("mar/#")
-            mqtt_client.loop_start()
-            print(f"  ✓ Sottoscritto a MQTT Broker ({MQTT_BROKER}:{MQTT_PORT}) su 'mar/#'")
-        except Exception as e:
-            print(f"  ⚠️ Connessione MQTT fallita ({e}).")
+        mqtt_client = mqtt.Client(client_id="mar-gateway-server")
+        mqtt_client.on_message = on_mqtt_message
+        connected = False
+        for attempt in range(1, 16):
+            try:
+                mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+                mqtt_client.subscribe("mar/#")
+                mqtt_client.loop_start()
+                print(f"  ✓ Sottoscritto a MQTT Broker ({MQTT_BROKER}:{MQTT_PORT}) su 'mar/#'")
+                connected = True
+                break
+            except Exception as e:
+                print(f"  ⚠️ MQTT tentativo {attempt}/15 fallito ({e}). Retry in 2s...")
+                await asyncio.sleep(2)
+        if not connected:
+            print("  ⚠️ Connessione MQTT non riuscita dopo i retry.")
 
     # Long-range LoRa telemetry link (RFM95W SPI or Waveshare SX1262 USB)
     if LORA_ENABLED:
