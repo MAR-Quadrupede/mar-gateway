@@ -28,14 +28,18 @@ spec:
             - configMapRef:
                 name: mar-cluster-config
           env:
-            - name: MAR_YOLO_STRIDE
-              value: "8"
+            - name: MAR_YOLO_ENABLE
+              value: "0"
+            - name: MAR_STEREO_BM
+              value: "1"
             - name: MAR_SGBM_DIV
               value: "4"
             - name: MAR_RECT_DIV
               value: "2"
             - name: MAR_STREAM_MAX_W
-              value: "960"
+              value: "640"
+            - name: MAR_TARGET_STREAM_FPS
+              value: "30"
           securityContext:
             privileged: true
           volumeMounts:
