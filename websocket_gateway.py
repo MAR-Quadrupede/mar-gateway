@@ -49,8 +49,9 @@ LORA_RST_PIN = int(os.getenv("LORA_RST_PIN", "25"))
 LORA_FREQ_MHZ = float(os.getenv("LORA_FREQ_MHZ", "868.0"))
 LORA_TX_INTERVAL = float(os.getenv("LORA_TX_INTERVAL", "1.0"))
 
-# Heavy lidar scans freeze browsers over Tailscale — forward a light summary only
-LIDAR_SCAN_MIN_INTERVAL_S = float(os.getenv("LIDAR_SCAN_MIN_INTERVAL_S", "0.5"))
+# LiDAR scan → browser: abbastanza denso per radar, senza saturare Tailscale
+LIDAR_SCAN_MIN_INTERVAL_S = float(os.getenv("LIDAR_SCAN_MIN_INTERVAL_S", "0.15"))
+LIDAR_SCAN_MAX_POINTS = int(os.getenv("LIDAR_SCAN_MAX_POINTS", "180"))
 FSM_MIN_INTERVAL_S = float(os.getenv("FSM_MIN_INTERVAL_S", "0.1"))
 
 connected_clients: Set = set()
@@ -81,17 +82,22 @@ def _should_forward(topic: str) -> bool:
 
 
 def _lighten_payload(topic: str, data: Any) -> Any:
-    """Replace huge lidar point clouds with a dashboard-friendly summary."""
+    """Keep a dense-enough LiDAR cloud for the radar widget (≤ LIDAR_SCAN_MAX_POINTS)."""
     if topic != "mar/lidar/scan" or not isinstance(data, dict):
         return data
     points = data.get("points") or []
+    n = len(points)
+    max_pts = max(36, LIDAR_SCAN_MAX_POINTS)
+    if n > max_pts:
+        step = max(1, n // max_pts)
+        points = points[::step][:max_pts]
     return {
         "timestamp": data.get("timestamp", time.time()),
-        "point_count": len(points),
+        "point_count": int(data.get("point_count") or n),
+        "cloud_count": len(points),
         "sector_mins": data.get("sector_mins", {}),
         "front_distance_m": data.get("front_distance_m"),
-        # keep a coarse subset for optional radar widgets
-        "points": points[:: max(1, len(points) // 60)][:60] if points else [],
+        "points": points,
     }
 
 
