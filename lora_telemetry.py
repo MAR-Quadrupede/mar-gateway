@@ -88,8 +88,16 @@ class LoRaRadio:
             return self.requested_backend
         if os.path.exists("/dev/spidev0.0"):
             return "spi"
-        if os.path.exists(self.port):
+
+        arduino_port = os.environ.get("SERIAL_PORT", "/dev/ttyUSB0")
+        if os.path.exists(self.port) and self.port != arduino_port:
             return "usb"
+
+        for candidate in ("/dev/ttyUSB1", "/dev/ttyUSB2", "/dev/ttyACM0", "/dev/ttyACM1"):
+            if os.path.exists(candidate) and candidate != arduino_port:
+                self.port = candidate
+                return "usb"
+
         return "simulated"
 
     def open(self) -> bool:
@@ -303,6 +311,7 @@ class LoRaBridge:
         self._roll: Optional[float] = None
         self._pitch: Optional[float] = None
         self._front_cm: Optional[float] = None
+        self._ultrasonic_cm: Optional[float] = None
         self._battery_v: Optional[float] = None
         self._fsm_state: str = ""
         self._last_source_ts = 0.0
@@ -329,6 +338,14 @@ class LoRaBridge:
                 except (TypeError, ValueError):
                     pass
 
+            elif topic in ("mar/ultrasonic/range", "mar/ultrasonic/telemetry"):
+                raw_us = data.get("us_cm") or data.get("ultrasonic_cm") or data.get("distance_cm") or data.get("us")
+                try:
+                    if raw_us is not None:
+                        self._ultrasonic_cm = float(raw_us)
+                except (TypeError, ValueError):
+                    pass
+
             elif topic == "mar/fsm/state":
                 state = str(data.get("state", "")).strip()
                 reason = str(data.get("reason", "")).strip()
@@ -352,6 +369,7 @@ class LoRaBridge:
         with self._lock:
             roll, pitch = self._roll, self._pitch
             front_cm = self._front_cm
+            us_cm = self._ultrasonic_cm
             battery = self._battery_v
             state = self._fsm_state or "IDLE"
 
@@ -361,11 +379,12 @@ class LoRaBridge:
             imu_part = "R:  --  P:  -- "
 
         lidar_part = f"Fr:{front_cm:3.0f}cm" if front_cm is not None else "Fr: -- "
+        us_part = f" | [US] {us_cm:3.0f}cm" if us_cm is not None else ""
         batt_part = f" | [BATT] {battery:.1f}V" if battery is not None else ""
 
-        # Same frame layout as the legacy monolith, terminated with \n so that
-        # the ground-station serial reader is unblocked (Windows/Linux).
-        return f"[IMU] {imu_part} | [LiDAR] {lidar_part}{batt_part} || {state}\n"
+        # Same frame layout as legacy with US addition, terminated with \n so that
+        # the ground-station serial reader is unblocked (Windows/Linux/Web Serial).
+        return f"[IMU] {imu_part} | [LiDAR] {lidar_part}{us_part}{batt_part} || {state}\n"
 
     # ------------------------------------------------------------------- loop
     def start(self):

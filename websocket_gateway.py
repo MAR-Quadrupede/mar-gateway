@@ -101,6 +101,99 @@ def _lighten_payload(topic: str, data: Any) -> Any:
     }
 
 
+def process_lora_command(line: str, mqtt_client_instance):
+    """Parses uplink commands received via radio from the ground station and dispatches to MQTT."""
+    if not line or not mqtt_client_instance or not mqtt_client_instance.is_connected():
+        return
+
+    clean = line.strip()
+    if not clean or clean.startswith("#"):
+        return
+
+    # Always log and publish raw frame to mar/lora/rx for observability
+    mqtt_client_instance.publish("mar/lora/rx", json.dumps({
+        "timestamp": time.time(),
+        "payload": clean
+    }))
+
+    upper = clean.upper()
+
+    # 1. Emergency Stop
+    if any(k in upper for k in ("ESTOP", "E-STOP", "E-CUT", "STOP_EMERGENCY")):
+        print(f"🚨 [LORA RX] E-STOP RICEVUTO VIA RADIO: '{clean}'")
+        mqtt_client_instance.publish(
+            "mar/safety/estop",
+            json.dumps({"reason": "LORA_RADIO_ESTOP", "raw": clean, "timestamp": time.time()})
+        )
+        mqtt_client_instance.publish(
+            "mar/control/motion",
+            json.dumps({
+                "cmd": "STOP",
+                "param": "",
+                "reason": "LORA_RADIO_ESTOP",
+                "state": "EMERGENCY_STOP",
+                "timestamp": time.time()
+            })
+        )
+        return
+
+    # 2. Resume / Reset from safety stop
+    if upper in ("RESUME", "CMD:RESUME", "RESET", "CMD:RESET"):
+        print(f"✅ [LORA RX] RESUME RICEVUTO VIA RADIO: '{clean}'")
+        mqtt_client_instance.publish(
+            "mar/safety/resume",
+            json.dumps({"reason": "LORA_RADIO_RESUME", "raw": clean, "timestamp": time.time()})
+        )
+        return
+
+    # 3. Motion or generic command (e.g. CMD:FORWARD,50 | CMD:STOP | FORWARD,50 | AVANTI)
+    raw_cmd = clean
+    if raw_cmd.upper().startswith("CMD:"):
+        raw_cmd = raw_cmd[4:].strip()
+
+    parts = [p.strip() for p in raw_cmd.split(",", 1)]
+    verb = parts[0].upper()
+    param = parts[1] if len(parts) > 1 else ""
+
+    # Translate Italian / alternative keywords to canonical commands
+    verb_map = {
+        "AVANTI": "FORWARD",
+        "INDIETRO": "BACKWARD",
+        "RETRO": "BACKWARD",
+        "SINISTRA": "TURN_L",
+        "GIRA_SX": "TURN_L",
+        "DESTRA": "TURN_R",
+        "GIRA_DX": "TURN_R",
+        "STOP": "STOP",
+        "FERMA": "STOP",
+        "STOP_TERRA": "STOP",
+        "PASSO": "WALK",
+        "TROTTO": "TROT",
+        "STAND": "STAND",
+        "SIT": "SIT"
+    }
+    canonical_verb = verb_map.get(verb, verb)
+
+    print(f"📡 [LORA RX] COMANDO RADIO APPLICATO: {canonical_verb} (param='{param}')")
+
+    # Manual motion implies operator wants to leave latched E-STOP
+    mqtt_client_instance.publish(
+        "mar/safety/resume",
+        json.dumps({"reason": "MOTION_AFTER_ESTOP_LORA", "timestamp": time.time()})
+    )
+
+    mqtt_client_instance.publish(
+        "mar/control/motion",
+        json.dumps({
+            "cmd": canonical_verb,
+            "param": param,
+            "reason": "LORA_GROUND_LINK",
+            "state": "MANUAL",
+            "timestamp": time.time()
+        })
+    )
+
+
 def on_mqtt_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         client.subscribe("mar/#")
@@ -299,11 +392,7 @@ async def main_async():
 
     if LORA_ENABLED:
         def on_lora_rx(line: str):
-            if mqtt_client and mqtt_client.is_connected():
-                mqtt_client.publish("mar/lora/rx", json.dumps({
-                    "timestamp": time.time(),
-                    "payload": line
-                }))
+            process_lora_command(line, mqtt_client)
 
         radio = LoRaRadio(
             backend=LORA_BACKEND,
