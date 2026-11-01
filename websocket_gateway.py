@@ -11,7 +11,8 @@ import time
 import queue
 import asyncio
 import signal
-from typing import Optional, Set, Dict, Any
+import threading
+from typing import Optional, Set, Dict, Any, Callable
 
 try:
     import paho.mqtt.client as mqtt
@@ -101,97 +102,188 @@ def _lighten_payload(topic: str, data: Any) -> Any:
     }
 
 
-def process_lora_command(line: str, mqtt_client_instance):
-    """Parses uplink commands received via radio from the ground station and dispatches to MQTT."""
-    if not line or not mqtt_client_instance or not mqtt_client_instance.is_connected():
-        return
+class GatewayCommandHub:
+    """
+    Centro Unificato di Ingestione Comandi del Gateway M.A.R.
+    Riceve le direttive da entrambi i vettori di comunicazione:
+      1. WebSocket (IP / Tailscale / LAN / Internet)
+      2. Radio LoRa (868 MHz / porta seriale locale / SPI)
 
-    clean = line.strip()
-    if not clean or clean.startswith("#"):
-        return
+    Centralizza validazione, normalizzazione, deduplicazione e dispatch
+    verso il bus MQTT (mar/safety/*, mar/control/*).
+    """
 
-    # Always log and publish raw frame to mar/lora/rx for observability
-    mqtt_client_instance.publish("mar/lora/rx", json.dumps({
-        "timestamp": time.time(),
-        "payload": clean
-    }))
+    def __init__(self, get_mqtt_client: Callable[[], Any]):
+        self.get_mqtt_client = get_mqtt_client
+        self._lock = threading.Lock()
+        self.last_cmd: Optional[str] = None
+        self.last_param: Optional[str] = None
+        self.last_kind: Optional[str] = None
+        self.last_source: Optional[str] = None
+        self.last_ts: float = 0.0
+        self.total_commands: int = 0
 
-    upper = clean.upper()
+    def dispatch_from_websocket(self, raw_data: Dict[str, Any]) -> bool:
+        """Entry point unificato per comandi ricevuti via WebSocket."""
+        return self._handle_command(source="WEBSOCKET", data=raw_data)
 
-    # 1. Emergency Stop
-    if any(k in upper for k in ("ESTOP", "E-STOP", "E-CUT", "STOP_EMERGENCY")):
-        print(f"🚨 [LORA RX] E-STOP RICEVUTO VIA RADIO: '{clean}'")
-        mqtt_client_instance.publish(
-            "mar/safety/estop",
-            json.dumps({"reason": "LORA_RADIO_ESTOP", "raw": clean, "timestamp": time.time()})
-        )
-        mqtt_client_instance.publish(
-            "mar/control/motion",
-            json.dumps({
-                "cmd": "STOP",
-                "param": "",
-                "reason": "LORA_RADIO_ESTOP",
-                "state": "EMERGENCY_STOP",
-                "timestamp": time.time()
-            })
-        )
-        return
+    def dispatch_from_lora(self, raw_line: str) -> bool:
+        """Entry point unificato per comandi ricevuti via Radio LoRa 868 MHz."""
+        return self._handle_command(source="LORA_RADIO", data=raw_line)
 
-    # 2. Resume / Reset from safety stop
-    if upper in ("RESUME", "CMD:RESUME", "RESET", "CMD:RESET"):
-        print(f"✅ [LORA RX] RESUME RICEVUTO VIA RADIO: '{clean}'")
-        mqtt_client_instance.publish(
-            "mar/safety/resume",
-            json.dumps({"reason": "LORA_RADIO_RESUME", "raw": clean, "timestamp": time.time()})
-        )
-        return
+    def _handle_command(self, source: str, data: Any) -> bool:
+        mqtt = self.get_mqtt_client()
+        if not mqtt or not mqtt.is_connected():
+            print(f"⚠️ [GATEWAY HUB] Ricevuto comando da {source} ma MQTT non è connesso!")
+            return False
 
-    # 3. Motion or generic command (e.g. CMD:FORWARD,50 | CMD:STOP | FORWARD,50 | AVANTI)
-    raw_cmd = clean
-    if raw_cmd.upper().startswith("CMD:"):
-        raw_cmd = raw_cmd[4:].strip()
+        now = time.time()
+        kind = ""
+        cmd = ""
+        param = ""
+        reason = ""
 
-    parts = [p.strip() for p in raw_cmd.split(",", 1)]
-    verb = parts[0].upper()
-    param = parts[1] if len(parts) > 1 else ""
+        # --- A. Ingestione da Radio LoRa (stringa ASCII grezza) ---
+        if isinstance(data, str):
+            clean = data.strip()
+            if not clean or clean.startswith("#"):
+                return False
 
-    # Translate Italian / alternative keywords to canonical commands
-    verb_map = {
-        "AVANTI": "FORWARD",
-        "INDIETRO": "BACKWARD",
-        "RETRO": "BACKWARD",
-        "SINISTRA": "TURN_L",
-        "GIRA_SX": "TURN_L",
-        "DESTRA": "TURN_R",
-        "GIRA_DX": "TURN_R",
-        "STOP": "STOP",
-        "FERMA": "STOP",
-        "STOP_TERRA": "STOP",
-        "PASSO": "WALK",
-        "TROTTO": "TROT",
-        "STAND": "STAND",
-        "SIT": "SIT"
-    }
-    canonical_verb = verb_map.get(verb, verb)
+            # Log e tracciamento frame raw LoRa su MQTT
+            mqtt.publish("mar/lora/rx", json.dumps({"timestamp": now, "payload": clean}))
 
-    print(f"📡 [LORA RX] COMANDO RADIO APPLICATO: {canonical_verb} (param='{param}')")
+            # Se fosse una stringa JSON
+            if clean.startswith("{") and clean.endswith("}"):
+                try:
+                    data = json.loads(clean)
+                except Exception:
+                    pass
 
-    # Manual motion implies operator wants to leave latched E-STOP
-    mqtt_client_instance.publish(
-        "mar/safety/resume",
-        json.dumps({"reason": "MOTION_AFTER_ESTOP_LORA", "timestamp": time.time()})
-    )
+        # --- B. Estrazione semantica del comando ---
+        if isinstance(data, dict):
+            msg_type = str(data.get("type", "")).upper()
+            if msg_type in ("ESTOP", "E-STOP", "E-CUT"):
+                kind = "ESTOP"
+                reason = data.get("reason", f"DASHBOARD_{source}")
+            elif msg_type in ("RESUME", "RESET"):
+                kind = "RESUME"
+                reason = data.get("reason", f"DASHBOARD_RESUME_{source}")
+            elif msg_type == "MOTION_CMD":
+                kind = "MOTION"
+                cmd_data = data.get("data", {})
+                cmd = str(cmd_data.get("cmd", "")).upper()
+                param = str(cmd_data.get("param", ""))
+                reason = cmd_data.get("reason", f"MANUAL_{source}")
+            else:
+                return False
+        else:
+            # Stringa di testo (LoRa o terminale)
+            clean = str(data).strip()
+            upper = clean.upper()
 
-    mqtt_client_instance.publish(
-        "mar/control/motion",
-        json.dumps({
-            "cmd": canonical_verb,
-            "param": param,
-            "reason": "LORA_GROUND_LINK",
-            "state": "MANUAL",
-            "timestamp": time.time()
-        })
-    )
+            if any(k in upper for k in ("ESTOP", "E-STOP", "E-CUT", "STOP_EMERGENCY")):
+                kind = "ESTOP"
+                reason = f"LORA_RADIO_ESTOP"
+            elif upper in ("RESUME", "CMD:RESUME", "RESET", "CMD:RESET"):
+                kind = "RESUME"
+                reason = f"LORA_RADIO_RESUME"
+            else:
+                kind = "MOTION"
+                raw_cmd = clean
+                if raw_cmd.upper().startswith("CMD:"):
+                    raw_cmd = raw_cmd[4:].strip()
+                parts = [p.strip() for p in raw_cmd.split(",", 1)]
+                verb = parts[0].upper()
+                param = parts[1] if len(parts) > 1 else ""
+
+                verb_map = {
+                    "AVANTI": "FORWARD",
+                    "INDIETRO": "BACKWARD",
+                    "RETRO": "BACKWARD",
+                    "SINISTRA": "TURN_L",
+                    "GIRA_SX": "TURN_L",
+                    "DESTRA": "TURN_R",
+                    "GIRA_DX": "TURN_R",
+                    "STOP": "STOP",
+                    "FERMA": "STOP",
+                    "STOP_TERRA": "STOP",
+                    "PASSO": "WALK",
+                    "TROTTO": "TROT",
+                    "STAND": "STAND",
+                    "SIT": "SIT"
+                }
+                cmd = verb_map.get(verb, verb)
+                reason = f"LORA_GROUND_LINK"
+
+        # --- C. Deduplicazione & Arbitraggio tra canali paralleli ---
+        # Se la dashboard trasmette sia via LoRa che via WebSocket contemporaneamente (dual-mode)
+        # deduplichiamo entro una finestra di 200ms per evitare doppio azionamento meccanico.
+        with self._lock:
+            if kind == "MOTION" and cmd == self.last_cmd and param == self.last_param:
+                if (now - self.last_ts) < 0.20:
+                    delta_ms = (now - self.last_ts) * 1000.0
+                    print(f"ℹ️ [GATEWAY HUB] Comando {cmd}({param}) da {source} duplicato ({delta_ms:.0f}ms da {self.last_source}) - Filtrato")
+                    return True
+
+            self.last_kind = kind
+            self.last_cmd = cmd
+            self.last_param = param
+            self.last_source = source
+            self.last_ts = now
+            self.total_commands += 1
+
+        # --- D. Transizione Unificata al Bus MQTT locale ---
+        if kind == "ESTOP":
+            print(f"🚨 [GATEWAY HUB] E-STOP RICEVUTO DA {source}! Motivo: {reason}")
+            mqtt.publish(
+                "mar/safety/estop",
+                json.dumps({"source": source, "reason": reason, "timestamp": now})
+            )
+            mqtt.publish(
+                "mar/control/motion",
+                json.dumps({
+                    "cmd": "STOP",
+                    "param": "",
+                    "source": source,
+                    "reason": reason,
+                    "state": "EMERGENCY_STOP",
+                    "timestamp": now
+                })
+            )
+            return True
+
+        elif kind == "RESUME":
+            print(f"✅ [GATEWAY HUB] RESUME RICEVUTO DA {source}! Motivo: {reason}")
+            mqtt.publish(
+                "mar/safety/resume",
+                json.dumps({"source": source, "reason": reason, "timestamp": now})
+            )
+            return True
+
+        elif kind == "MOTION":
+            print(f"🎯 [GATEWAY HUB] MOTION DA {source}: {cmd} (param='{param}') -> MQTT mar/control/motion")
+            # Un movimento manuale intenzionale dell'operatore sblocca l'E-STOP latched
+            mqtt.publish(
+                "mar/safety/resume",
+                json.dumps({"source": source, "reason": f"MOTION_AFTER_ESTOP_{source}", "timestamp": now})
+            )
+            mqtt.publish(
+                "mar/control/motion",
+                json.dumps({
+                    "cmd": cmd,
+                    "param": param,
+                    "source": source,
+                    "reason": reason,
+                    "state": "MANUAL",
+                    "timestamp": now
+                })
+            )
+            return True
+
+        return False
+
+
+command_hub = GatewayCommandHub(lambda: mqtt_client)
 
 
 def on_mqtt_connect(client, userdata, flags, rc, properties=None):
@@ -312,33 +404,8 @@ async def ws_handler(websocket):
                 data = json.loads(raw_msg)
                 msg_type = data.get("type", "")
 
-                if msg_type == "ESTOP":
-                    print("🚨 [GATEWAY] Ricevuto E-STOP da WebSocket!")
-                    if mqtt_client:
-                        mqtt_client.publish(
-                            "mar/safety/estop",
-                            json.dumps({"reason": "DASHBOARD_BUTTON", "timestamp": time.time()}),
-                        )
-
-                elif msg_type == "RESUME":
-                    print("✅ [GATEWAY] Resume da WebSocket")
-                    if mqtt_client:
-                        mqtt_client.publish(
-                            "mar/safety/resume",
-                            json.dumps({"reason": "DASHBOARD_RESUME", "timestamp": time.time()}),
-                        )
-
-                elif msg_type == "MOTION_CMD":
-                    cmd_data = data.get("data", {})
-                    if mqtt_client:
-                        if "timestamp" not in cmd_data:
-                            cmd_data = {**cmd_data, "timestamp": time.time()}
-                        # Manual motion implies operator wants to leave latched E-STOP
-                        mqtt_client.publish(
-                            "mar/safety/resume",
-                            json.dumps({"reason": "MOTION_AFTER_ESTOP", "timestamp": time.time()}),
-                        )
-                        mqtt_client.publish("mar/control/motion", json.dumps(cmd_data))
+                if msg_type in ("ESTOP", "RESUME", "MOTION_CMD"):
+                    command_hub.dispatch_from_websocket(data)
 
                 elif msg_type == "PING":
                     await websocket.send(json.dumps({
@@ -392,7 +459,7 @@ async def main_async():
 
     if LORA_ENABLED:
         def on_lora_rx(line: str):
-            process_lora_command(line, mqtt_client)
+            command_hub.dispatch_from_lora(line)
 
         radio = LoRaRadio(
             backend=LORA_BACKEND,
