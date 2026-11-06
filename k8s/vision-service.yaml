@@ -45,6 +45,12 @@ spec:
           volumeMounts:
             - name: dev-mount
               mountPath: /dev
+            - name: vision-fixes
+              mountPath: /app/camera/stereo_depth.py
+              subPath: stereo_depth.py
+            - name: vision-fixes
+              mountPath: /app/main.py
+              subPath: main.py
           resources:
             requests:
               cpu: 500m
@@ -56,6 +62,9 @@ spec:
         - name: dev-mount
           hostPath:
             path: /dev
+        - name: vision-fixes
+          configMap:
+            name: mar-vision-fixes
 ---
 apiVersion: v1
 kind: Service
