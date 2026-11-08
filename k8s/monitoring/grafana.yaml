@@ -13,6 +13,44 @@ data:
         url: http://prometheus.mar-system.svc.cluster.local:9090
         isDefault: true
         editable: false
+      - name: PostgreSQL (MAR Robot State)
+        type: postgres
+        access: proxy
+        url: mar-postgres.mar-system.svc.cluster.local:5432
+        user: mar_user
+        secureJsonData:
+          password: ${GF_DATABASE_PASSWORD}
+        jsonData:
+          database: mar_db
+          sslmode: disable
+          maxOpenConns: 10
+          maxIdleConns: 5
+          connMaxLifetime: 14400
+          postgresVersion: 1700
+        editable: true
+      - name: Redis (MAR Telemetry Cache)
+        type: redis-datasource
+        access: proxy
+        url: redis://mar-redis.mar-system.svc.cluster.local:6379
+        jsonData:
+          client: standalone
+          poolSize: 5
+          timeout: 10
+          pingInterval: 10
+        editable: true
+      - name: Mosquitto MQTT (Live Bus)
+        type: grafana-mqtt-datasource
+        access: proxy
+        jsonData:
+          uri: tcp://mar-mosquitto.mar-system.svc.cluster.local:1883
+        editable: true
+      - name: Gateway REST API
+        type: marcusolsson-json-datasource
+        access: proxy
+        url: http://mar-gateway.mar-system.svc.cluster.local:8765
+        jsonData:
+          queryParams: ""
+        editable: true
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -39,14 +77,65 @@ spec:
             - containerPort: 3000
               name: http-grafana
           env:
+            - name: GF_DATABASE_TYPE
+              value: "postgres"
+            - name: GF_DATABASE_HOST
+              value: "mar-postgres:5432"
+            - name: GF_DATABASE_NAME
+              value: "grafana"
+            - name: GF_DATABASE_USER
+              value: "mar_user"
+            - name: GF_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mar-storage-secrets
+                  key: POSTGRES_PASSWORD
+            - name: GF_DATABASE_SSL_MODE
+              value: "disable"
+            - name: GF_DATABASE_MAX_OPEN_CONN
+              value: "20"
+            - name: GF_DATABASE_MAX_IDLE_CONN
+              value: "10"
+            - name: GF_DATABASE_CONN_MAX_LIFETIME
+              value: "14400"
             - name: GF_SECURITY_ADMIN_USER
               value: "admin"
             - name: GF_SECURITY_ADMIN_PASSWORD
-              value: "admin"
+              valueFrom:
+                secretKeyRef:
+                  name: mar-grafana-secrets
+                  key: GF_SECURITY_ADMIN_PASSWORD
+                  optional: true
             - name: GF_USERS_ALLOW_SIGN_UP
               value: "false"
+            - name: GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS
+              value: "grafana-irm-app"
             - name: GF_INSTALL_PLUGINS
               value: ""
+            - name: GF_AUTH_PROXY_ENABLED
+              value: "true"
+            - name: GF_AUTH_PROXY_HEADER_NAME
+              value: "Remote-User"
+            - name: GF_AUTH_PROXY_HEADER_PROPERTY
+              value: "username"
+            - name: GF_AUTH_PROXY_AUTO_SIGN_UP
+              value: "true"
+            - name: GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN
+              value: "true"
+            - name: GF_USERS_AUTO_ASSIGN_ORG_ROLE
+              value: "Admin"
+            - name: GF_AUTH_DISABLE_LOGIN_FORM
+              value: "false"
+            - name: GF_LIVE_ENABLED
+              value: "false"
+            - name: GF_ANALYTICS_CHECK_FOR_UPDATES
+              value: "false"
+            - name: GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES
+              value: "false"
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+            - name: GF_NEWS_NEWS_FEED_ENABLED
+              value: "false"
           volumeMounts:
             - name: datasources
               mountPath: /etc/grafana/provisioning/datasources/datasources.yaml
@@ -55,17 +144,19 @@ spec:
               mountPath: /var/lib/grafana
           resources:
             requests:
-              cpu: 50m
-              memory: 80Mi
+              cpu: 100m
+              memory: 128Mi
             limits:
-              cpu: 300m
-              memory: 256Mi
+              cpu: 1000m
+              memory: 512Mi
       volumes:
         - name: datasources
           configMap:
             name: grafana-datasources
         - name: storage
-          emptyDir: {}
+          hostPath:
+            path: /var/lib/mar-grafana-data
+            type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
