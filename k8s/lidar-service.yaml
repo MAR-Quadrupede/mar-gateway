@@ -28,7 +28,7 @@ spec:
             - name: LIDAR_BAUD
               value: "230400"
             - name: LIDAR_OFFSET_DEG
-              value: "90.0"
+              value: "0.0"
             - name: LIDAR_SIMULATE
               value: "false"
             # Non sondare le porte USB (resetterebbe gli Arduino): il LiDAR è sulla UART nativa

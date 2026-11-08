@@ -21,7 +21,7 @@ data:
   LIDAR_PORT: "/dev/ttyAMA0"
   LIDAR_BAUD: "230400"
   LIDAR_SIMULATE: "false"
-  LIDAR_OFFSET_DEG: "90.0"
+  LIDAR_OFFSET_DEG: "0.0"
   LORA_ENABLED: "false"
   LORA_BACKEND: "auto"
   LORA_PORT: "/dev/ttyUSB1"
