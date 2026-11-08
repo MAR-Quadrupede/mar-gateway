@@ -22,6 +22,26 @@ spec:
           envFrom:
             - configMapRef:
                 name: mar-cluster-config
+          env:
+            # Fusione & FSM
+            - name: MAR_AUTONOMOUS
+              value: "1"
+            - name: MAR_FORWARD_SPEED
+              value: "50"
+            - name: MAR_SLOW_SPEED
+              value: "25"
+            - name: MAR_DECISION_HZ
+              value: "20"
+            - name: MAR_STATE_HZ
+              value: "10"
+            - name: MAR_MANUAL_TIMEOUT_S
+              value: "3.0"
+            - name: MAR_RISK_EMA_ALPHA
+              value: "0.30"
+            - name: MAR_RISK_ESCALATE_S
+              value: "0.20"
+            - name: MAR_RISK_DEESCALATE_S
+              value: "1.2"
           resources:
             requests:
               cpu: 100m

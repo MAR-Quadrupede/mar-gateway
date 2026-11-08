@@ -22,6 +22,20 @@ spec:
           envFrom:
             - configMapRef:
                 name: mar-cluster-config
+          env:
+            # Le porte USB vengono assegnate per RUOLO (banner): nessuna porta forzata
+            - name: SERIAL_PORT
+              value: ""
+            - name: ULTRASONIC_ENABLED
+              value: "true"
+            - name: ULTRASONIC_PORT
+              value: ""
+            - name: ULTRASONIC_BAUD
+              value: "115200"
+            - name: ULTRASONIC_AUTO_FALLBACK
+              value: "false"
+            - name: PORT_RESCAN_S
+              value: "10"
           securityContext:
             privileged: true
           volumeMounts:

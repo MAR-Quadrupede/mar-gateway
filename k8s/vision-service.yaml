@@ -29,7 +29,13 @@ spec:
                 name: mar-cluster-config
           env:
             - name: MAR_YOLO_ENABLE
-              value: "0"
+              value: "1"
+            - name: MAR_YOLO_PERIOD_S
+              value: "0.5"
+            - name: MAR_YOLO_IMGSZ
+              value: "256"
+            - name: MAR_YOLO_MODEL
+              value: "yolov8n.pt"
             - name: MAR_STEREO_BM
               value: "0"
             - name: MAR_SGBM_DIV
@@ -39,18 +45,22 @@ spec:
             - name: MAR_STREAM_MAX_W
               value: "1280"
             - name: MAR_TARGET_STREAM_FPS
-              value: "30"
+              value: "15"
+            - name: MAR_RISK_EMA_ALPHA
+              value: "0.35"
+            - name: MAR_RISK_ESCALATE_S
+              value: "0.20"
+            - name: MAR_RISK_DEESCALATE_S
+              value: "0.90"
+            - name: MAR_FOV_ON_FRAMES
+              value: "3"
+            - name: MAR_FOV_OFF_FRAMES
+              value: "6"
           securityContext:
             privileged: true
           volumeMounts:
             - name: dev-mount
               mountPath: /dev
-            - name: vision-fixes
-              mountPath: /app/camera/stereo_depth.py
-              subPath: stereo_depth.py
-            - name: vision-fixes
-              mountPath: /app/main.py
-              subPath: main.py
           resources:
             requests:
               cpu: 500m
@@ -62,9 +72,6 @@ spec:
         - name: dev-mount
           hostPath:
             path: /dev
-        - name: vision-fixes
-          configMap:
-            name: mar-vision-fixes
 ---
 apiVersion: v1
 kind: Service
